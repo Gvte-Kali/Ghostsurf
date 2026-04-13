@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=GhostSurf
+Comment=Transparent Tor proxy
+Exec=ghostsurf tray
+Icon=/usr/lib/ghostsurf/assets/icons/ghost.svg
+Type=Application
+Categories=Network;Security;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true

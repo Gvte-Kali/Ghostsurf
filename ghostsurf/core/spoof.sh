@@ -7,6 +7,7 @@ spoof_apply() {
     _spoof_mac
     _spoof_hostname
     _spoof_tcp_timestamps
+    _spoof_disable_ipv6
     log_success "Spoofing appliqué"
 }
 
@@ -40,4 +41,12 @@ _spoof_tcp_timestamps() {
     sysctl -w net.ipv4.tcp_timestamps=0 2>/dev/null || true
     # Bloque les ICMP timestamps
     sysctl -w net.ipv4.icmp_echo_ignore_all=0 2>/dev/null || true
+}
+
+_spoof_disable_ipv6() {
+    # Désactive IPv6 complètement
+    sysctl -w net.ipv6.conf.all.disable_ipv6=1     2>/dev/null || true
+    sysctl -w net.ipv6.conf.default.disable_ipv6=1 2>/dev/null || true
+    sysctl -w net.ipv6.conf.lo.disable_ipv6=1      2>/dev/null || true
+    log_debug "IPv6 désactivé"
 }

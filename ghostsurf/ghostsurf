@@ -63,13 +63,20 @@ EOF
 cmd_start() {
     require_root
     distro_detect
+    if firewall_is_active; then
+        log_warn "GhostSurf déjà actif — restauration avant relance..."
+        cmd_stop
+        sleep 2
+    fi
     log_info "Démarrage GhostSurf v$GHOSTSURF_VERSION..."
     [[ "$GHOSTSURF_SELINUX" == "true" ]] && selinux_setup
     snapshot_create
     [[ "$GHOSTSURF_SPOOF" == "true" ]] && spoof_apply
     tor_start
     firewall_apply
-    log_success "GhostSurf actif — IP: $(tor_check_ip 2>/dev/null || echo '...')"
+    # Vérification IP après firewall
+    local ip; ip=$(tor_check_ip 2>/dev/null || echo "?")
+    log_success "GhostSurf actif — IP: $ip"
 }
 
 cmd_stop() {
@@ -109,6 +116,8 @@ EOF
 
 cmd_dev_start() {
     require_root
+    # Force verbose en mode dev
+    export GHOSTSURF_VERBOSE=true
     log_warn "Mode DEV: watchdog actif (rollback si perte réseau >30s)"
     cmd_start
     (

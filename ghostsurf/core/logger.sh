@@ -11,7 +11,7 @@ _gs_log() {
         echo "[${ts}] [${level}] ${msg}" >&2
     fi
     # Journal dans le state dir si disponible
-    if [[ -d "${STATE_DIR:-/var/lib/ghostsurf}" ]]; then
+    if [[ -d "${STATE_DIR:-}" ]]; then
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] [${level}] ${msg}" \
             >> "${STATE_DIR}/ghostsurf.log" 2>/dev/null || true
     fi
