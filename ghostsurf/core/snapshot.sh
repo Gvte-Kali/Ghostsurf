@@ -137,5 +137,5 @@ snapshot_latest_date() {
 
 snapshot_cleanup_old() {
     # Garde les 10 derniers snapshots
-    ls -dt "$SNAPSHOT_BASE"/*/  2>/dev/null | tail -n +11 | xargs rm -rf 2>/dev/null || true
+    ls -dt "$SNAPSHOT_BASE"/*/  2>/dev/null | tail -n +6 | xargs rm -rf 2>/dev/null || true
 }
