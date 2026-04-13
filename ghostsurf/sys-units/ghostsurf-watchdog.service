@@ -1,0 +1,11 @@
+[Unit]
+Description=GhostSurf watchdog — rollback si perte réseau
+After=ghostsurf.service
+BindsTo=ghostsurf.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ghostsurf dev-start
+Restart=no
+StandardOutput=journal
+StandardError=journal

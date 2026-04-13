@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+# ghostsurf — transparent Tor proxy for any Linux distro
+set -eE
+
+GHOSTSURF_VERSION="0.1.0"
+GHOSTSURF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$GHOSTSURF_DIR/core"
+CONFIG_DIR="/etc/ghostsurf"
+STATE_DIR="/var/lib/ghostsurf"
+
+source "$LIB_DIR/logger.sh"
+source "$LIB_DIR/distro.sh"
+source "$LIB_DIR/snapshot.sh"
+source "$LIB_DIR/firewall.sh"
+source "$LIB_DIR/tor.sh"
+source "$LIB_DIR/spoof.sh"
+source "$LIB_DIR/selinux.sh"
+source "$LIB_DIR/identity.sh"
+
+_emergency_rollback() {
+    local code=$? line=$1
+    log_error "Crash ligne $line (code $code) — rollback urgence..."
+    snapshot_restore 2>/dev/null || true
+    exit "$code"
+}
+trap '_emergency_rollback $LINENO' ERR
+trap 'snapshot_restore 2>/dev/null; exit 130' INT
+trap 'snapshot_restore 2>/dev/null; exit 143' TERM
+
+require_root() {
+    [[ $EUID -eq 0 ]] || { log_error "ghostsurf requiert root (sudo)"; exit 1; }
+}
+
+usage() {
+cat <<EOF
+ghostsurf v$GHOSTSURF_VERSION — transparent Tor proxy
+
+Usage: sudo ghostsurf <commande> [options]
+
+  start             Active le proxy Tor transparent
+  stop              Désactive et restaure l'état original
+  restart           Redémarre
+  status            Affiche l'état (IP, Tor, firewall)
+  newid             Nouvelle identité Tor
+
+  snapshot          Crée un snapshot manuel
+  restore [<ts>]    Restaure un snapshot
+  snapshots         Liste les snapshots
+
+  dev-start         Démarre avec watchdog (rollback auto)
+  check             Vérifie les dépendances
+  firewall-check    Dry-run des règles nftables
+  tray              Lance le systray
+
+Options:
+  --no-spoof        Désactive spoofing MAC/hostname
+  --no-selinux      Ignore la config SELinux
+  -v, --verbose     Mode verbeux
+  -h, --help        Cette aide
+EOF
+}
+
+cmd_start() {
+    require_root
+    distro_detect
+    log_info "Démarrage GhostSurf v$GHOSTSURF_VERSION..."
+    [[ "$GHOSTSURF_SELINUX" == "true" ]] && selinux_setup
+    snapshot_create
+    [[ "$GHOSTSURF_SPOOF" == "true" ]] && spoof_apply
+    tor_start
+    firewall_apply
+    log_success "GhostSurf actif — IP: $(tor_check_ip 2>/dev/null || echo '...')"
+}
+
+cmd_stop() {
+    require_root
+    log_info "Arrêt GhostSurf..."
+    firewall_restore 2>/dev/null || true
+    tor_stop 2>/dev/null || true
+    [[ "$GHOSTSURF_SPOOF" == "true" ]] && spoof_restore 2>/dev/null || true
+    [[ "$GHOSTSURF_SELINUX" == "true" ]] && selinux_teardown 2>/dev/null || true
+    snapshot_restore
+    log_success "GhostSurf arrêté. État système restauré."
+}
+
+cmd_status() {
+    local tor_st fw_st ip distro_n backend sel_st snap_date
+    tor_st=$(tor_is_active 2>/dev/null && echo "actif" || echo "inactif")
+    fw_st=$(firewall_is_active 2>/dev/null && echo "actif" || echo "inactif")
+    ip=$(tor_check_ip 2>/dev/null || echo "indisponible")
+    distro_n=$(distro_name 2>/dev/null || echo "inconnu")
+    backend=$(firewall_detect_backend 2>/dev/null || echo "inconnu")
+    sel_st=$(selinux_status 2>/dev/null || echo "N/A")
+    snap_date=$(snapshot_latest_date 2>/dev/null || echo "aucun")
+    cat <<EOF
+
+  GhostSurf v$GHOSTSURF_VERSION
+  ─────────────────────────────
+  Tor        : $tor_st
+  Firewall   : $fw_st
+  IP         : $ip
+  Distro     : $distro_n
+  Backend fw : $backend
+  SELinux    : $sel_st
+  Snapshot   : $snap_date
+
+EOF
+}
+
+cmd_dev_start() {
+    require_root
+    log_warn "Mode DEV: watchdog actif (rollback si perte réseau >30s)"
+    cmd_start
+    (
+        sleep 15
+        local fails=0
+        while true; do
+            if ! curl -s --max-time 5 https://check.torproject.org/api/ip >/dev/null 2>&1; then
+                ((fails++)) || true
+                log_warn "Watchdog: perte connectivité ($fails/6)"
+                if [[ $fails -ge 6 ]]; then
+                    log_error "Watchdog: rollback automatique"
+                    cmd_stop; exit 1
+                fi
+            else
+                fails=0
+            fi
+            sleep 5
+        done
+    ) &
+    echo $! > "$STATE_DIR/watchdog.pid"
+    log_info "Watchdog PID: $(cat $STATE_DIR/watchdog.pid)"
+}
+
+SPOOF=true; SELINUX=true; VERBOSE=false
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --no-spoof)   SPOOF=false; shift ;;
+        --no-selinux) SELINUX=false; shift ;;
+        -v|--verbose) VERBOSE=true; shift ;;
+        -h|--help)    usage; exit 0 ;;
+        *)            break ;;
+    esac
+done
+export GHOSTSURF_SPOOF=$SPOOF GHOSTSURF_SELINUX=$SELINUX GHOSTSURF_VERBOSE=$VERBOSE
+
+case "${1:-}" in
+    start)           cmd_start ;;
+    stop)            cmd_stop ;;
+    restart)         cmd_stop; cmd_start ;;
+    status)          cmd_status ;;
+    newid)           require_root; identity_new ;;
+    snapshot)        require_root; snapshot_create ;;
+    restore)         require_root; snapshot_restore "${2:-}" ;;
+    snapshots)       snapshot_list ;;
+    dev-start)       cmd_dev_start ;;
+    check)           distro_detect; distro_check_deps ;;
+    firewall-check)  require_root; firewall_dryrun ;;
+    tray)            python3 "$GHOSTSURF_DIR/gui/tray.py" ;;
+    ""|--help|-h)    usage ;;
+    *)               log_error "Commande inconnue: $1"; usage; exit 1 ;;
+esac

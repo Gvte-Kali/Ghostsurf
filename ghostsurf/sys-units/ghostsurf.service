@@ -1,0 +1,15 @@
+[Unit]
+Description=GhostSurf — transparent Tor proxy
+After=network.target tor.service
+Wants=tor.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/ghostsurf start
+ExecStop=/usr/bin/ghostsurf stop
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

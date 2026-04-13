@@ -1,0 +1,22 @@
+# GhostSurf configuration
+# Copier vers /etc/ghostsurf/ghostsurf.conf et adapter
+
+# Spoofing activé par défaut
+SPOOF_MAC=true
+SPOOF_HOSTNAME=true
+SPOOF_TIMEZONE=false
+
+# SELinux (auto-détecté si non défini)
+# SELINUX_SETUP=auto
+
+# Ports Tor (ne pas changer sauf conflit)
+TOR_TRANS_PORT=9040
+TOR_DNS_PORT=5353
+TOR_SOCKS_PORT=9050
+TOR_CONTROL_PORT=9051
+
+# Watchdog (secondes avant rollback)
+WATCHDOG_TIMEOUT=30
+
+# Snapshots à conserver
+SNAPSHOT_KEEP=10
