@@ -76,6 +76,7 @@ cmd_start() {
     [[ "$GHOSTSURF_SPOOF" == "true" ]] && spoof_apply
     tor_start
     firewall_apply
+    touch "$STATE_DIR/active"
     # Vérification IP après firewall
     local ip; ip=$(tor_check_ip 2>/dev/null || echo "?")
     log_success "GhostSurf actif — IP: $ip"
@@ -85,6 +86,7 @@ cmd_stop() {
     require_root
     log_info "Arrêt GhostSurf..."
     firewall_restore 2>/dev/null || true
+    rm -f "$STATE_DIR/active"
     tor_stop 2>/dev/null || true
     [[ "$GHOSTSURF_SPOOF" == "true" ]] && spoof_restore 2>/dev/null || true
     [[ "$GHOSTSURF_SELINUX" == "true" ]] && selinux_teardown 2>/dev/null || true
@@ -94,10 +96,26 @@ cmd_stop() {
 
 cmd_status() {
     local tor_st fw_st distro_n backend sel_st snap_date
+
     tor_st=$(tor_is_active 2>/dev/null && echo "actif" || echo "inactif")
-    fw_st=$(firewall_is_active 2>/dev/null && echo "actif" || echo "inactif")
+
+    # Firewall — état via le fichier marqueur (pas besoin de root)
+    if [[ -f "$STATE_DIR/active" ]]; then
+        fw_st="actif"
+    else
+        fw_st="inactif"
+    fi
+
+    # Backend — détection sans root
+    if command -v nft &>/dev/null; then
+        backend="nft"
+    elif command -v iptables &>/dev/null; then
+        backend="iptables"
+    else
+        backend="inconnu"
+    fi
+
     distro_n=$(distro_name 2>/dev/null || echo "inconnu")
-    backend=$(firewall_detect_backend 2>/dev/null || echo "inconnu")
     sel_st=$(selinux_status 2>/dev/null || echo "N/A")
     snap_date=$(snapshot_latest_date 2>/dev/null || echo "aucun")
 
@@ -111,26 +129,24 @@ cmd_status() {
   Backend fw : $backend
   SELinux    : $sel_st
   Snapshot   : $snap_date
-
 EOF
 
-    if tor_is_active 2>/dev/null; then
-        local uptime circuits dns_st
-        uptime=$(tor_uptime 2>/dev/null || echo "?")
-        circuits=$(tor_circuit_count 2>/dev/null || echo "?")
-        dns_st=$(tor_check_dns_leak 2>/dev/null && echo "OK" || echo "LEAK DÉTECTÉ")
-
-        echo "  ── Identité Tor ──────────────────"
-        tor_myip 2>/dev/null || echo "  (indisponible)"
-        cat <<EOF
-
-  ── Sécurité ──────────────────────
-  Uptime Tor : $uptime
-  Circuits   : $circuits
-  DNS Leak   : $dns_st
-
-EOF
+    if [[ "$tor_st" == "actif" ]]; then
+        local ip_info
+        ip_info=$(tor_check_ip_full 2>/dev/null || echo "")
+        if [[ -n "$ip_info" ]]; then
+            echo "  ── Identité Tor ──────────────────"
+            echo "$ip_info"
+        fi
+        echo "  ── Sécurité ──────────────────────"
+        local uptime
+        uptime=$(systemctl show tor@default tor \
+            --property=ActiveEnterTimestamp 2>/dev/null | \
+            grep -oP '=\K.*' | head -1 || echo "N/A")
+        echo "  Uptime Tor : $uptime"
+        echo "  DNS Leak   : $(tor_check_dns_leak 2>/dev/null && echo OK || echo WARN)"
     fi
+    echo ""
 }
 
 cmd_myip() {
@@ -259,7 +275,27 @@ case "${1:-}" in
     dev-start)       cmd_dev_start ;;
     check)           distro_detect; distro_check_deps ;;
     firewall-check)  require_root; firewall_dryrun ;;
-    tray)            python3 "$GHOSTSURF_DIR/gui/tray.py" ;;
+    tray)
+        if [[ $EUID -eq 0 ]]; then
+            log_error "Le systray ne doit pas être lancé en root."
+            log_info  "Lance : ghostsurf tray  (sans sudo)"
+            exit 1
+        fi
+        export STATE_DIR="$HOME/.local/share/ghostsurf"
+        mkdir -p "$STATE_DIR"
+        python3 "$GHOSTSURF_DIR/gui/tray.py"
+        local exit_code=$?
+        if [[ $exit_code -ne 0 && $exit_code -ne 130 ]]; then
+            log_warn "Tray crashé (code $exit_code) — vérification état système..."
+            if [[ -f "$STATE_DIR/active" ]]; then
+                log_warn "GhostSurf était actif au moment du crash"
+                notify-send "GhostSurf" \
+                    "Le systray a crashé. GhostSurf est toujours actif.\nLance 'ghostsurf stop' pour restaurer." \
+                    --icon=dialog-warning 2>/dev/null || true
+                log_warn "Lance 'sudo ghostsurf stop' pour restaurer l'état système"
+            fi
+        fi
+        ;;
     ""|--help|-h)    usage ;;
     *)               log_error "Commande inconnue: $1"; usage; exit 1 ;;
 esac

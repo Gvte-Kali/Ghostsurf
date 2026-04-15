@@ -12,20 +12,50 @@ try:
     from PyQt6.QtWidgets import (
         QApplication, QSystemTrayIcon, QMenu,
         QWidget, QVBoxLayout, QHBoxLayout,
-        QLabel, QPushButton, QFrame
+        QLabel, QPushButton, QFrame, QTextEdit,
+        QSizeGrip
     )
     from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QCursor
-    from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal
+    from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal, QPoint
 except ImportError:
     print("PyQt6 requis:")
     print("  sudo apt install python3-pyqt6 python3-pyqt6.qtsvg")
-    print("  sudo dnf install python3-qt6")
-    print("  sudo pacman -S python-pyqt6")
     sys.exit(1)
 
 GHOSTSURF_BIN = Path(__file__).parent.parent / "ghostsurf"
 if not GHOSTSURF_BIN.exists():
     GHOSTSURF_BIN = Path("/usr/bin/ghostsurf")
+
+# Mapping code pays → drapeau emoji
+COUNTRY_FLAGS = {
+    "AF":"🇦🇫","AL":"🇦🇱","DZ":"🇩🇿","AD":"🇦🇩","AO":"🇦🇴","AR":"🇦🇷","AM":"🇦🇲",
+    "AU":"🇦🇺","AT":"🇦🇹","AZ":"🇦🇿","BS":"🇧🇸","BH":"🇧🇭","BD":"🇧🇩","BY":"🇧🇾",
+    "BE":"🇧🇪","BZ":"🇧🇿","BJ":"🇧🇯","BT":"🇧🇹","BO":"🇧🇴","BA":"🇧🇦","BW":"🇧🇼",
+    "BR":"🇧🇷","BN":"🇧🇳","BG":"🇧🇬","BF":"🇧🇫","BI":"🇧🇮","CV":"🇨🇻","KH":"🇰🇭",
+    "CM":"🇨🇲","CA":"🇨🇦","CF":"🇨🇫","TD":"🇹🇩","CL":"🇨🇱","CN":"🇨🇳","CO":"🇨🇴",
+    "KM":"🇰🇲","CG":"🇨🇬","CD":"🇨🇩","CR":"🇨🇷","HR":"🇭🇷","CU":"🇨🇺","CY":"🇨🇾",
+    "CZ":"🇨🇿","DK":"🇩🇰","DJ":"🇩🇯","DO":"🇩🇴","EC":"🇪🇨","EG":"🇪🇬","SV":"🇸🇻",
+    "GQ":"🇬🇶","ER":"🇪🇷","EE":"🇪🇪","SZ":"🇸🇿","ET":"🇪🇹","FJ":"🇫🇯","FI":"🇫🇮",
+    "FR":"🇫🇷","GA":"🇬🇦","GM":"🇬🇲","GE":"🇬🇪","DE":"🇩🇪","GH":"🇬🇭","GR":"🇬🇷",
+    "GT":"🇬🇹","GN":"🇬🇳","GW":"🇬🇼","GY":"🇬🇾","HT":"🇭🇹","HN":"🇭🇳","HU":"🇭🇺",
+    "IS":"🇮🇸","IN":"🇮🇳","ID":"🇮🇩","IR":"🇮🇷","IQ":"🇮🇶","IE":"🇮🇪","IL":"🇮🇱",
+    "IT":"🇮🇹","JM":"🇯🇲","JP":"🇯🇵","JO":"🇯🇴","KZ":"🇰🇿","KE":"🇰🇪","KI":"🇰🇮",
+    "KW":"🇰🇼","KG":"🇰🇬","LA":"🇱🇦","LV":"🇱🇻","LB":"🇱🇧","LS":"🇱🇸","LR":"🇱🇷",
+    "LY":"🇱🇾","LI":"🇱🇮","LT":"🇱🇹","LU":"🇱🇺","MG":"🇲🇬","MW":"🇲🇼","MY":"🇲🇾",
+    "MV":"🇲🇻","ML":"🇲🇱","MT":"🇲🇹","MH":"🇲🇭","MR":"🇲🇷","MU":"🇲🇺","MX":"🇲🇽",
+    "FM":"🇫🇲","MD":"🇲🇩","MC":"🇲🇨","MN":"🇲🇳","ME":"🇲🇪","MA":"🇲🇦","MZ":"🇲🇿",
+    "MM":"🇲🇲","NA":"🇳🇦","NR":"🇳🇷","NP":"🇳🇵","NL":"🇳🇱","NZ":"🇳🇿","NI":"🇳🇮",
+    "NE":"🇳🇪","NG":"🇳🇬","NO":"🇳🇴","OM":"🇴🇲","PK":"🇵🇰","PW":"🇵🇼","PA":"🇵🇦",
+    "PG":"🇵🇬","PY":"🇵🇾","PE":"🇵🇪","PH":"🇵🇭","PL":"🇵🇱","PT":"🇵🇹","QA":"🇶🇦",
+    "RO":"🇷🇴","RU":"🇷🇺","RW":"🇷🇼","KN":"🇰🇳","LC":"🇱🇨","VC":"🇻🇨","WS":"🇼🇸",
+    "SM":"🇸🇲","ST":"🇸🇹","SA":"🇸🇦","SN":"🇸🇳","RS":"🇷🇸","SC":"🇸🇨","SL":"🇸🇱",
+    "SG":"🇸🇬","SK":"🇸🇰","SI":"🇸🇮","SB":"🇸🇧","SO":"🇸🇴","ZA":"🇿🇦","SS":"🇸🇸",
+    "ES":"🇪🇸","LK":"🇱🇰","SD":"🇸🇩","SR":"🇸🇷","SE":"🇸🇪","CH":"🇨🇭","SY":"🇸🇾",
+    "TW":"🇹🇼","TJ":"🇹🇯","TZ":"🇹🇿","TH":"🇹🇭","TL":"🇹🇱","TG":"🇹🇬","TO":"🇹🇴",
+    "TT":"🇹🇹","TN":"🇹🇳","TR":"🇹🇷","TM":"🇹🇲","TV":"🇹🇻","UG":"🇺🇬","UA":"🇺🇦",
+    "AE":"🇦🇪","GB":"🇬🇧","US":"🇺🇸","UY":"🇺🇾","UZ":"🇺🇿","VU":"🇻🇺","VE":"🇻🇪",
+    "VN":"🇻🇳","YE":"🇾🇪","ZM":"🇿🇲","ZW":"🇿🇼","EU":"🇪🇺","UN":"🇺🇳",
+}
 
 ICON_ACTIVE = """
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
@@ -76,18 +106,17 @@ def svg_to_icon(svg_str: str, size: int = 22) -> QIcon:
         pix.fill(Qt.GlobalColor.transparent)
         p = QPainter(pix)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        if "2ecc71" in svg_str:
-            color = QColor("#2ecc71")
-        elif "e74c3c" in svg_str:
-            color = QColor("#e74c3c")
-        else:
-            color = QColor("#f39c12")
+        color = QColor("#2ecc71") if "2ecc71" in svg_str else \
+                QColor("#e74c3c") if "e74c3c" in svg_str else \
+                QColor("#f39c12")
         p.setBrush(color)
         p.setPen(Qt.PenStyle.NoPen)
         p.drawEllipse(2, 2, size - 4, size - 4)
         p.end()
         return QIcon(pix)
 
+
+# ── Workers ───────────────────────────────────────────────────────────────────
 
 class GhostSurfWorker(QThread):
     finished = pyqtSignal(bool, str)
@@ -99,7 +128,7 @@ class GhostSurfWorker(QThread):
     def run(self):
         try:
             result = subprocess.run(
-                ["pkexec", str(GHOSTSURF_BIN), self.command],
+                ["sudo", str(GHOSTSURF_BIN), self.command],
                 capture_output=True, text=True, timeout=120
             )
             self.finished.emit(result.returncode == 0, result.stdout + result.stderr)
@@ -115,18 +144,36 @@ class StatusWorker(QThread):
     def run(self):
         try:
             result = subprocess.run(
-                [str(GHOSTSURF_BIN), "status"],
-                capture_output=True, text=True, timeout=10
+                ["sudo", str(GHOSTSURF_BIN), "status"],
+                capture_output=True, text=True, timeout=15
             )
             data = {}
             for line in result.stdout.splitlines():
-                if ":" in line:
+                line = line.strip()
+                if ":" in line and not line.startswith("─") \
+                        and not line.startswith("GhostSurf"):
                     k, _, v = line.partition(":")
                     data[k.strip()] = v.strip()
             self.status_ready.emit(data)
         except Exception:
             self.status_ready.emit({})
 
+
+class NewIdWorker(QThread):
+    finished = pyqtSignal(bool, str)
+
+    def run(self):
+        try:
+            result = subprocess.run(
+                ["sudo", str(GHOSTSURF_BIN), "newid"],
+                capture_output=True, text=True, timeout=120
+            )
+            self.finished.emit(result.returncode == 0, result.stdout + result.stderr)
+        except Exception as e:
+            self.finished.emit(False, str(e))
+
+
+# ── Fenêtre status ────────────────────────────────────────────────────────────
 
 class StatusWindow(QWidget):
 
@@ -136,27 +183,33 @@ class StatusWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("GhostSurf")
+        # Fenêtre normale — déplaçable et redimensionnable
         self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.WindowStaysOnTopHint |
             Qt.WindowType.Tool
         )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedWidth(290)
+        self.setMinimumWidth(300)
+        self.setMinimumHeight(300)
+        self.resize(320, 420)
         self._build_ui()
+        self._apply_style()
 
-    def _build_ui(self):
-        container = QFrame(self)
-        container.setObjectName("container")
-        container.setStyleSheet("""
-            QFrame#container {
+    def _apply_style(self):
+        self.setStyleSheet("""
+            QWidget {
                 background: #0d1117;
-                border: 1px solid #30363d;
-                border-radius: 12px;
+                color: #e6edf3;
+                font-family: monospace;
+            }
+            QFrame#sep {
+                color: #21262d;
+                background: #21262d;
+                max-height: 1px;
             }
         """)
 
-        layout = QVBoxLayout(container)
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(6)
 
@@ -166,36 +219,33 @@ class StatusWindow(QWidget):
         self.dot.setStyleSheet("color: #e74c3c; font-size: 11px;")
         title = QLabel("GhostSurf")
         title.setStyleSheet(
-            "color: #e6edf3; font-size: 13px; font-weight: bold; font-family: monospace;"
+            "color: #e6edf3; font-size: 14px; font-weight: bold;"
         )
-        close_btn = QPushButton("✕")
-        close_btn.setFixedSize(18, 18)
-        close_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent; color: #8b949e;
-                border: none; font-size: 10px;
-            }
-            QPushButton:hover { color: #e6edf3; }
-        """)
-        close_btn.clicked.connect(self.hide)
         header.addWidget(self.dot)
-        header.addSpacing(4)
+        header.addSpacing(6)
         header.addWidget(title)
         header.addStretch()
-        header.addWidget(close_btn)
         layout.addLayout(header)
 
-        # Séparateur
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("color: #21262d;")
-        layout.addWidget(sep)
+        self._add_sep(layout)
 
-        # Rows
+        # IP publique avec drapeau — mise en avant
+        self.ip_banner = QLabel("—")
+        self.ip_banner.setStyleSheet("""
+            color: #2ecc71;
+            font-size: 16px;
+            font-weight: bold;
+            padding: 8px 0;
+        """)
+        self.ip_banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.ip_banner)
+
+        self._add_sep(layout)
+
+        # Champs status
         self.rows = {}
         fields = [
             ("Tor",        "Statut Tor"),
-            ("IP",         "IP publique"),
             ("Firewall",   "Firewall"),
             ("Distro",     "Distribution"),
             ("Backend fw", "Backend"),
@@ -205,59 +255,92 @@ class StatusWindow(QWidget):
         for key, label in fields:
             row = QHBoxLayout()
             lbl = QLabel(label)
-            lbl.setFixedWidth(110)
-            lbl.setStyleSheet(
-                "color: #8b949e; font-size: 11px; font-family: monospace;"
-            )
+            lbl.setFixedWidth(120)
+            lbl.setStyleSheet("color: #8b949e; font-size: 11px;")
             val = QLabel("—")
-            val.setStyleSheet(
-                "color: #e6edf3; font-size: 11px; font-family: monospace;"
-            )
+            val.setStyleSheet("color: #e6edf3; font-size: 11px;")
             val.setWordWrap(True)
             row.addWidget(lbl)
             row.addWidget(val, 1)
             self.rows[key] = val
             layout.addLayout(row)
 
-        # Séparateur
-        sep2 = QFrame()
-        sep2.setFrameShape(QFrame.Shape.HLine)
-        sep2.setStyleSheet("color: #21262d;")
-        layout.addWidget(sep2)
+        self._add_sep(layout)
 
         # Boutons
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
-
         self.toggle_btn = QPushButton("▶  Activer")
         self.toggle_btn.setStyleSheet(self._btn("#238636", "#2ea043"))
         self.toggle_btn.clicked.connect(self.toggle_requested.emit)
-
         self.newid_btn = QPushButton("⟳  New ID")
         self.newid_btn.setStyleSheet(self._btn("#1f6feb", "#388bfd"))
         self.newid_btn.clicked.connect(self.newid_requested.emit)
-
         btn_row.addWidget(self.toggle_btn)
         btn_row.addWidget(self.newid_btn)
         layout.addLayout(btn_row)
 
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.addWidget(container)
+        self._add_sep(layout)
+
+        # Zone logs
+        self.log_area = QTextEdit()
+        self.log_area.setReadOnly(True)
+        self.log_area.setMinimumHeight(70)
+        self.log_area.setStyleSheet("""
+            QTextEdit {
+                background: #010409;
+                color: #8b949e;
+                border: 1px solid #21262d;
+                border-radius: 4px;
+                font-family: monospace;
+                font-size: 10px;
+                padding: 4px;
+            }
+        """)
+        layout.addWidget(self.log_area, 1)
+
+        # Grip de redimensionnement
+        grip_row = QHBoxLayout()
+        grip_row.addStretch()
+        grip = QSizeGrip(self)
+        grip.setStyleSheet("background: transparent;")
+        grip_row.addWidget(grip)
+        layout.addLayout(grip_row)
+
+    def _add_sep(self, layout):
+        sep = QFrame()
+        sep.setObjectName("sep")
+        sep.setFrameShape(QFrame.Shape.HLine)
+        layout.addWidget(sep)
 
     def _btn(self, bg: str, hover: str) -> str:
         return f"""
             QPushButton {{
                 background: {bg}; color: #fff;
                 border: none; border-radius: 6px;
-                padding: 5px 10px; font-size: 11px;
-                font-family: monospace;
+                padding: 6px 12px; font-size: 12px;
             }}
             QPushButton:hover {{ background: {hover}; }}
             QPushButton:disabled {{ background: #21262d; color: #8b949e; }}
         """
 
     def update_status(self, data: dict, active: bool, loading: bool = False):
+        # IP banner avec drapeau
+        ip  = data.get("IP Tor", data.get("IP", ""))
+        pays = data.get("Pays", "")
+        flag = COUNTRY_FLAGS.get(pays.upper(), "🌐") if pays else ""
+
+        if ip and ip != "?" and ip != "—":
+            self.ip_banner.setText(f"{flag}  {ip}  {pays}")
+            self.ip_banner.setStyleSheet(
+                "color: #2ecc71; font-size: 15px; font-weight: bold; padding: 8px 0;"
+            )
+        else:
+            self.ip_banner.setText("—")
+            self.ip_banner.setStyleSheet(
+                "color: #8b949e; font-size: 15px; padding: 8px 0;"
+            )
+
         for key, widget in self.rows.items():
             widget.setText(data.get(key, "—"))
 
@@ -278,12 +361,28 @@ class StatusWindow(QWidget):
             self.toggle_btn.setStyleSheet(self._btn("#238636", "#2ea043"))
 
         self.toggle_btn.setEnabled(True)
-        self.newid_btn.setEnabled(active)
+        self.newid_btn.setEnabled(active and not loading)
+
+    def add_log(self, msg: str, level: str = "info"):
+        from PyQt6.QtCore import QDateTime
+        colors = {
+            "ok":    "#2ecc71",
+            "error": "#e74c3c",
+            "warn":  "#f39c12",
+            "info":  "#8b949e",
+        }
+        color = colors.get(level, "#8b949e")
+        ts = QDateTime.currentDateTime().toString("HH:mm:ss")
+        self.log_area.append(
+            f'<span style="color:#444d56">[{ts}]</span> '
+            f'<span style="color:{color}">{msg}</span>'
+        )
+        sb = self.log_area.verticalScrollBar()
+        sb.setValue(sb.maximum())
 
     def show_near_cursor(self):
-        self.adjustSize()
-        pos = QCursor.pos()
         screen = QApplication.primaryScreen().availableGeometry()
+        pos = QCursor.pos()
         x = max(screen.x(), min(pos.x() - self.width() // 2,
                                 screen.x() + screen.width() - self.width()))
         y = max(screen.y(), min(pos.y() - self.height() - 12,
@@ -294,15 +393,19 @@ class StatusWindow(QWidget):
         self.activateWindow()
 
 
+# ── Systray ───────────────────────────────────────────────────────────────────
+
 class GhostSurfTray(QSystemTrayIcon):
 
     def __init__(self, app: QApplication):
         super().__init__()
-        self.app      = app
-        self._active  = False
-        self._loading = False
-        self._worker  = None
+        self.app            = app
+        self._active        = False
+        self._loading       = False
+        self._worker        = None
+        self._newid_worker  = None
         self._status_worker = None
+        self._prev_active   = None
 
         self.win = StatusWindow()
         self.win.toggle_requested.connect(self._toggle)
@@ -314,10 +417,23 @@ class GhostSurfTray(QSystemTrayIcon):
         self.activated.connect(self._on_activated)
         self.show()
 
-        self.timer = QTimer()
-        self.timer.timeout.connect(self._refresh)
-        self.timer.start(10000)
+        # Timer rapide — vérifie juste si Tor est actif (sans appel réseau)
+        self.timer_fast = QTimer()
+        self.timer_fast.timeout.connect(self._refresh_quick)
+        self.timer_fast.start(2000)
+
+        # Timer lent — status complet avec IP
+        self.timer_slow = QTimer()
+        self.timer_slow.timeout.connect(self._refresh)
+        self.timer_slow.start(15000)
         self._refresh()
+
+    def _worker_running(self, worker) -> bool:
+        """Vérifie si un worker est encore actif sans crasher."""
+        try:
+            return worker is not None and worker.isRunning()
+        except RuntimeError:
+            return False
 
     def _build_menu(self):
         self.menu = QMenu()
@@ -363,46 +479,79 @@ class GhostSurfTray(QSystemTrayIcon):
             else:
                 self.win.show_near_cursor()
 
+    def _refresh_quick(self):
+        """Vérifie juste si Tor est actif — rapide, sans appel réseau."""
+        try:
+            if self._loading or self._worker_running(self._status_worker):
+                return
+            result = subprocess.run(
+                ["systemctl", "is-active", "tor@default"],
+                capture_output=True, text=True, timeout=2
+            )
+            active = result.returncode == 0
+            if active != self._active and not self._loading:
+                self._refresh()
+        except Exception:
+            pass
+
     def _refresh(self):
-        if self._loading:
+        if self._loading or self._worker_running(self._status_worker):
             return
-        worker = StatusWorker()
-        worker.status_ready.connect(self._on_status)
-        worker.start()
-        self._status_worker = worker
+        self._status_worker = StatusWorker()
+        self._status_worker.status_ready.connect(self._on_status)
+        self._status_worker.start()
 
     def _on_status(self, data: dict):
-        if self._loading:
-            return
-        tor = data.get("Tor", "inactif")
-        ip  = data.get("IP", "—")
-        self._active = (tor == "actif")
+        try:
+            if self._loading:
+                return
 
-        if self._active:
-            self.setIcon(svg_to_icon(ICON_ACTIVE))
-            self.status_item.setText(f"●  Actif — {ip}")
-            self.toggle_item.setText("■  Désactiver")
-            self.newid_item.setEnabled(True)
-            self.setToolTip(f"GhostSurf actif\nIP : {ip}")
-        else:
-            self.setIcon(svg_to_icon(ICON_INACTIVE))
-            self.status_item.setText("○  Inactif")
-            self.toggle_item.setText("▶  Activer")
-            self.newid_item.setEnabled(False)
-            self.setToolTip("GhostSurf — inactif")
+            ip   = data.get("IP Tor", data.get("IP", "—"))
+            pays = data.get("Pays", "")
+            flag = COUNTRY_FLAGS.get(pays.upper(), "") if pays else ""
+            tor  = data.get("Tor", "inactif")
+            self._active = (tor == "actif")
 
-        self.win.update_status(data, self._active)
+            if self._active:
+                label = f"●  {flag} {ip}" if ip and ip not in ("—", "?") \
+                        else "●  Actif"
+                self.setIcon(svg_to_icon(ICON_ACTIVE))
+                self.toggle_item.setText("■  Désactiver")
+                self.newid_item.setEnabled(True)
+                self.setToolTip(f"GhostSurf actif\n{flag} {ip}  {pays}".strip())
+            else:
+                label = "○  GhostSurf — inactif"
+                self.setIcon(svg_to_icon(ICON_INACTIVE))
+                self.toggle_item.setText("▶  Activer")
+                self.newid_item.setEnabled(False)
+                self.setToolTip("GhostSurf — inactif")
+
+            self.status_item.setText(label)
+            self.win.update_status(data, self._active)
+
+            if self._prev_active is not None \
+                    and self._prev_active != self._active:
+                self.win.add_log(
+                    f"GhostSurf {'actif' if self._active else 'arrêté'}",
+                    "ok" if self._active else "warn"
+                )
+            self._prev_active = self._active
+
+        except Exception as e:
+            print(f"Erreur _on_status: {e}")
 
     def _toggle(self):
         if self._loading:
             return
         self._loading = True
+        cmd = "stop" if self._active else "start"
         self.setIcon(svg_to_icon(ICON_LOADING))
         self.status_item.setText("○  En cours...")
         self.toggle_item.setEnabled(False)
         self.win.update_status({}, self._active, loading=True)
-
-        cmd = "stop" if self._active else "start"
+        self.win.add_log(
+            f"{'Arrêt' if self._active else 'Démarrage'} en cours...", "warn"
+        )
         self._worker = GhostSurfWorker(cmd)
         self._worker.finished.connect(self._on_done)
         self._worker.start()
@@ -410,24 +559,64 @@ class GhostSurfTray(QSystemTrayIcon):
     def _on_done(self, success: bool, _output: str):
         self._loading = False
         self.toggle_item.setEnabled(True)
+        self.win.add_log(
+            "Commande terminée" if success else "Erreur",
+            "ok" if success else "error"
+        )
+        if self._worker:
+            self._worker.wait(3000)
         self._refresh()
 
     def _new_identity(self):
         if not self._active or self._loading:
             return
+        if self._worker_running(self._newid_worker):
+            return
         self.newid_item.setEnabled(False)
-        worker = GhostSurfWorker("newid")
-        worker.finished.connect(
-            lambda ok, _: (
-                self.newid_item.setEnabled(True),
-                self._refresh()
-            )
+        self.win.add_log("Nouvelle identité en cours...", "warn")
+        self._newid_worker = NewIdWorker()
+        self._newid_worker.finished.connect(self._on_newid_done)
+        self._newid_worker.start()
+
+    def _on_newid_done(self, ok: bool, _output: str):
+        self.newid_item.setEnabled(True)
+        self.win.add_log(
+            "Nouvelle identité obtenue" if ok else "Erreur newid",
+            "ok" if ok else "error"
         )
-        worker.start()
+        if self._newid_worker:
+            self._newid_worker.wait(3000)
+        self._refresh()
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+def _handle_exception(exc_type, exc_value, exc_traceback):
+    """Handler global — log le crash et quitte proprement."""
+    import traceback
+    import datetime
+
+    log_dir = os.path.expanduser("~/.local/share/ghostsurf")
+    os.makedirs(log_dir, exist_ok=True)
+    crash_log = os.path.join(log_dir, "crash.log")
+
+    with open(crash_log, "a") as f:
+        f.write(f"\n[{datetime.datetime.now()}] CRASH\n")
+        traceback.print_exception(exc_type, exc_value, exc_traceback, file=f)
+
+    traceback.print_exception(exc_type, exc_value, exc_traceback)
+    print(f"\nCrash log : {crash_log}")
+
+    try:
+        QApplication.quit()
+    except Exception:
+        pass
+    sys.exit(1)
 
 
 def main():
-    # Vérifie qu'on n'est pas root
+    sys.excepthook = _handle_exception
+
     if os.geteuid() == 0:
         print("Le systray ne doit pas être lancé en root.")
         print("Lance : ghostsurf tray  (sans sudo)")
@@ -437,12 +626,19 @@ def main():
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("GhostSurf")
 
+    def qt_message_handler(mode, context, message):
+        if "QThread" in message and "Destroyed" in message:
+            pass  # Supprime le warning QThread verbeux
+        else:
+            print(f"Qt: {message}")
+
+    from PyQt6.QtCore import qInstallMessageHandler
+    qInstallMessageHandler(qt_message_handler)
+
     tray = GhostSurfTray(app)
 
-    # DBus warning est normal sur certains environnements — pas bloquant
     if not tray.isVisible():
         print("Impossible d'afficher le systray.")
-        print("Vérifie que ton bureau est démarré et que DISPLAY est défini.")
         sys.exit(1)
 
     sys.exit(app.exec())

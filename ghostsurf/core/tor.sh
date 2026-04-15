@@ -67,6 +67,8 @@ tor_myip() {
         "$ip" "$is_tor" "$country"
 }
 
+tor_check_ip_full() { tor_myip "$@"; }
+
 tor_uptime() {
     local svc; svc=$(_tor_service_name)
     systemctl show "$svc" --property=ActiveEnterTimestamp --no-pager 2>/dev/null | \

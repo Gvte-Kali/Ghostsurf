@@ -45,6 +45,7 @@ check_pkg ip          iproute2     iproute      iproute2
 check_pkg macchanger  macchanger   macchanger   macchanger
 check_pkg torsocks    torsocks     torsocks     torsocks
 check_pkg python3     python3      python3      python3
+check_pkg socat       socat        socat        socat
 
 if [[ ${#MISSING_PKGS[@]} -gt 0 ]]; then
     warn "Dépendances manquantes détectées :"
@@ -211,7 +212,24 @@ cp "$SRC_DIR/sys-units/"*.service /etc/systemd/system/
 systemctl daemon-reload
 success "Services installés"
 
-# --- Étape 6 : Résumé ---
+# --- Étape 6 : Sudoers ---
+info "Installation de la règle sudoers..."
+SUDOERS_FILE="/etc/sudoers.d/ghostsurf"
+cat > "$SUDOERS_FILE" <<EOF
+# GhostSurf — permet l'exécution sans mot de passe
+%sudo ALL=(ALL) NOPASSWD: /usr/bin/ghostsurf
+%wheel ALL=(ALL) NOPASSWD: /usr/bin/ghostsurf
+${SUDO_USER:-root} ALL=(ALL) NOPASSWD: /usr/bin/ghostsurf
+EOF
+chmod 440 "$SUDOERS_FILE"
+if visudo -c -f "$SUDOERS_FILE" &>/dev/null; then
+    success "Règle sudoers installée ($SUDOERS_FILE)"
+else
+    rm -f "$SUDOERS_FILE"
+    warn "Règle sudoers invalide — ignorée"
+fi
+
+# --- Étape 7 : Résumé ---
 echo ""
 echo "  ─────────────────────────────"
 success "GhostSurf installé avec succès !"
