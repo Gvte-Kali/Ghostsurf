@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
 GhostSurf — systray PyQt6
+Lance sans sudo : ghostsurf tray
 """
 import sys
+import os
 import subprocess
-import threading
 from pathlib import Path
 
 try:
@@ -13,13 +14,11 @@ try:
         QWidget, QVBoxLayout, QHBoxLayout,
         QLabel, QPushButton, QFrame
     )
-    from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont, QCursor
-    from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal, QPoint
+    from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QCursor
+    from PyQt6.QtCore import QTimer, Qt, QThread, pyqtSignal
 except ImportError:
     print("PyQt6 requis:")
-    print("  pip install PyQt6")
-    print("  # ou")
-    print("  sudo apt install python3-pyqt6")
+    print("  sudo apt install python3-pyqt6 python3-pyqt6.qtsvg")
     print("  sudo dnf install python3-qt6")
     print("  sudo pacman -S python-pyqt6")
     sys.exit(1)
@@ -28,15 +27,12 @@ GHOSTSURF_BIN = Path(__file__).parent.parent / "ghostsurf"
 if not GHOSTSURF_BIN.exists():
     GHOSTSURF_BIN = Path("/usr/bin/ghostsurf")
 
-
-# ── Icônes SVG inline ─────────────────────────────────────────────────────────
-
 ICON_ACTIVE = """
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <circle cx="32" cy="32" r="30" fill="#1a1a2e"/>
+  <circle cx="32" cy="32" r="30" fill="#0d1117"/>
   <circle cx="32" cy="32" r="22" fill="none" stroke="#2ecc71" stroke-width="2"/>
   <circle cx="32" cy="32" r="14" fill="none" stroke="#2ecc71" stroke-width="1.5" opacity="0.6"/>
-  <circle cx="32" cy="32" r="6"  fill="#2ecc71"/>
+  <circle cx="32" cy="32" r="6" fill="#2ecc71"/>
   <line x1="32" y1="2"  x2="32" y2="10" stroke="#2ecc71" stroke-width="2"/>
   <line x1="32" y1="54" x2="32" y2="62" stroke="#2ecc71" stroke-width="2"/>
   <line x1="2"  y1="32" x2="10" y2="32" stroke="#2ecc71" stroke-width="2"/>
@@ -46,10 +42,10 @@ ICON_ACTIVE = """
 
 ICON_INACTIVE = """
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <circle cx="32" cy="32" r="30" fill="#1a1a2e"/>
+  <circle cx="32" cy="32" r="30" fill="#0d1117"/>
   <circle cx="32" cy="32" r="22" fill="none" stroke="#e74c3c" stroke-width="2"/>
   <circle cx="32" cy="32" r="14" fill="none" stroke="#e74c3c" stroke-width="1.5" opacity="0.4"/>
-  <circle cx="32" cy="32" r="6"  fill="#e74c3c" opacity="0.7"/>
+  <circle cx="32" cy="32" r="6" fill="#e74c3c" opacity="0.7"/>
   <line x1="20" y1="20" x2="44" y2="44" stroke="#e74c3c" stroke-width="2.5"/>
   <line x1="44" y1="20" x2="20" y2="44" stroke="#e74c3c" stroke-width="2.5"/>
 </svg>
@@ -57,15 +53,14 @@ ICON_INACTIVE = """
 
 ICON_LOADING = """
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <circle cx="32" cy="32" r="30" fill="#1a1a2e"/>
+  <circle cx="32" cy="32" r="30" fill="#0d1117"/>
   <circle cx="32" cy="32" r="22" fill="none" stroke="#f39c12" stroke-width="2"/>
-  <circle cx="32" cy="32" r="6"  fill="#f39c12" opacity="0.8"/>
+  <circle cx="32" cy="32" r="6" fill="#f39c12" opacity="0.8"/>
 </svg>
 """
 
 
 def svg_to_icon(svg_str: str, size: int = 22) -> QIcon:
-    """Convertit une chaîne SVG en QIcon."""
     try:
         from PyQt6.QtSvg import QSvgRenderer
         from PyQt6.QtCore import QByteArray
@@ -77,27 +72,24 @@ def svg_to_icon(svg_str: str, size: int = 22) -> QIcon:
         painter.end()
         return QIcon(pix)
     except ImportError:
-        # Fallback si QtSvg absent — cercle coloré simple
         pix = QPixmap(size, size)
         pix.fill(Qt.GlobalColor.transparent)
         p = QPainter(pix)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         if "2ecc71" in svg_str:
-            p.setBrush(QColor("#2ecc71"))
+            color = QColor("#2ecc71")
         elif "e74c3c" in svg_str:
-            p.setBrush(QColor("#e74c3c"))
+            color = QColor("#e74c3c")
         else:
-            p.setBrush(QColor("#f39c12"))
+            color = QColor("#f39c12")
+        p.setBrush(color)
         p.setPen(Qt.PenStyle.NoPen)
         p.drawEllipse(2, 2, size - 4, size - 4)
         p.end()
         return QIcon(pix)
 
 
-# ── Worker thread ─────────────────────────────────────────────────────────────
-
 class GhostSurfWorker(QThread):
-    """Exécute les commandes ghostsurf en arrière-plan."""
     finished = pyqtSignal(bool, str)
 
     def __init__(self, command: str):
@@ -110,9 +102,7 @@ class GhostSurfWorker(QThread):
                 ["pkexec", str(GHOSTSURF_BIN), self.command],
                 capture_output=True, text=True, timeout=120
             )
-            success = result.returncode == 0
-            output = result.stdout + result.stderr
-            self.finished.emit(success, output)
+            self.finished.emit(result.returncode == 0, result.stdout + result.stderr)
         except subprocess.TimeoutExpired:
             self.finished.emit(False, "Timeout")
         except Exception as e:
@@ -120,7 +110,6 @@ class GhostSurfWorker(QThread):
 
 
 class StatusWorker(QThread):
-    """Récupère le statut en arrière-plan."""
     status_ready = pyqtSignal(dict)
 
     def run(self):
@@ -139,10 +128,10 @@ class StatusWorker(QThread):
             self.status_ready.emit({})
 
 
-# ── Fenêtre status ────────────────────────────────────────────────────────────
-
 class StatusWindow(QWidget):
-    """Petite fenêtre flottante affichant le statut détaillé."""
+
+    toggle_requested = pyqtSignal()
+    newid_requested  = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -153,11 +142,10 @@ class StatusWindow(QWidget):
             Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFixedWidth(290)
         self._build_ui()
-        self.setFixedWidth(280)
 
     def _build_ui(self):
-        # Conteneur principal avec style
         container = QFrame(self)
         container.setObjectName("container")
         container.setStyleSheet("""
@@ -170,32 +158,28 @@ class StatusWindow(QWidget):
 
         layout = QVBoxLayout(container)
         layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(8)
+        layout.setSpacing(6)
 
         # Header
         header = QHBoxLayout()
-        self.icon_label = QLabel("●")
-        self.icon_label.setStyleSheet("color: #e74c3c; font-size: 12px;")
+        self.dot = QLabel("●")
+        self.dot.setStyleSheet("color: #e74c3c; font-size: 11px;")
         title = QLabel("GhostSurf")
-        title.setStyleSheet("""
-            color: #e6edf3;
-            font-size: 13px;
-            font-weight: bold;
-            font-family: monospace;
-        """)
+        title.setStyleSheet(
+            "color: #e6edf3; font-size: 13px; font-weight: bold; font-family: monospace;"
+        )
         close_btn = QPushButton("✕")
-        close_btn.setFixedSize(20, 20)
+        close_btn.setFixedSize(18, 18)
         close_btn.setStyleSheet("""
             QPushButton {
-                background: transparent;
-                color: #8b949e;
-                border: none;
-                font-size: 11px;
+                background: transparent; color: #8b949e;
+                border: none; font-size: 10px;
             }
             QPushButton:hover { color: #e6edf3; }
         """)
         close_btn.clicked.connect(self.hide)
-        header.addWidget(self.icon_label)
+        header.addWidget(self.dot)
+        header.addSpacing(4)
         header.addWidget(title)
         header.addStretch()
         header.addWidget(close_btn)
@@ -204,127 +188,125 @@ class StatusWindow(QWidget):
         # Séparateur
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("color: #30363d;")
+        sep.setStyleSheet("color: #21262d;")
         layout.addWidget(sep)
 
-        # Infos
+        # Rows
         self.rows = {}
-        for key in ["Tor", "Firewall", "IP", "Distro", "Backend fw", "SELinux", "Snapshot"]:
+        fields = [
+            ("Tor",        "Statut Tor"),
+            ("IP",         "IP publique"),
+            ("Firewall",   "Firewall"),
+            ("Distro",     "Distribution"),
+            ("Backend fw", "Backend"),
+            ("SELinux",    "SELinux"),
+            ("Snapshot",   "Dernier snapshot"),
+        ]
+        for key, label in fields:
             row = QHBoxLayout()
-            lbl = QLabel(key)
-            lbl.setStyleSheet("color: #8b949e; font-size: 11px; font-family: monospace;")
-            lbl.setFixedWidth(80)
+            lbl = QLabel(label)
+            lbl.setFixedWidth(110)
+            lbl.setStyleSheet(
+                "color: #8b949e; font-size: 11px; font-family: monospace;"
+            )
             val = QLabel("—")
-            val.setStyleSheet("color: #e6edf3; font-size: 11px; font-family: monospace;")
+            val.setStyleSheet(
+                "color: #e6edf3; font-size: 11px; font-family: monospace;"
+            )
             val.setWordWrap(True)
             row.addWidget(lbl)
-            row.addWidget(val)
+            row.addWidget(val, 1)
             self.rows[key] = val
             layout.addLayout(row)
 
-        # Boutons
+        # Séparateur
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.Shape.HLine)
-        sep2.setStyleSheet("color: #30363d;")
+        sep2.setStyleSheet("color: #21262d;")
         layout.addWidget(sep2)
 
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(8)
+        # Boutons
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
 
-        self.toggle_btn = QPushButton("▶ Activer")
-        self.toggle_btn.setStyleSheet(self._btn_style("#238636", "#2ea043"))
+        self.toggle_btn = QPushButton("▶  Activer")
+        self.toggle_btn.setStyleSheet(self._btn("#238636", "#2ea043"))
+        self.toggle_btn.clicked.connect(self.toggle_requested.emit)
 
-        newid_btn = QPushButton("⟳ New ID")
-        newid_btn.setStyleSheet(self._btn_style("#1f6feb", "#388bfd"))
-        newid_btn.clicked.connect(self._new_id)
+        self.newid_btn = QPushButton("⟳  New ID")
+        self.newid_btn.setStyleSheet(self._btn("#1f6feb", "#388bfd"))
+        self.newid_btn.clicked.connect(self.newid_requested.emit)
 
-        btn_layout.addWidget(self.toggle_btn)
-        btn_layout.addWidget(newid_btn)
-        layout.addLayout(btn_layout)
+        btn_row.addWidget(self.toggle_btn)
+        btn_row.addWidget(self.newid_btn)
+        layout.addLayout(btn_row)
 
-        # Layout externe pour la transparence
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(container)
 
-    def _btn_style(self, bg: str, hover: str) -> str:
+    def _btn(self, bg: str, hover: str) -> str:
         return f"""
             QPushButton {{
-                background: {bg};
-                color: #ffffff;
-                border: none;
-                border-radius: 6px;
-                padding: 5px 10px;
-                font-size: 11px;
+                background: {bg}; color: #fff;
+                border: none; border-radius: 6px;
+                padding: 5px 10px; font-size: 11px;
                 font-family: monospace;
             }}
             QPushButton:hover {{ background: {hover}; }}
-            QPushButton:pressed {{ opacity: 0.8; }}
+            QPushButton:disabled {{ background: #21262d; color: #8b949e; }}
         """
 
-    def update_status(self, data: dict, active: bool):
-        self.rows["Tor"].setText(data.get("Tor", "—"))
-        self.rows["Firewall"].setText(data.get("Firewall", "—"))
-        self.rows["IP"].setText(data.get("IP", "—"))
-        self.rows["Distro"].setText(data.get("Distro", "—"))
-        self.rows["Backend fw"].setText(data.get("Backend fw", "—"))
-        self.rows["SELinux"].setText(data.get("SELinux", "—"))
-        self.rows["Snapshot"].setText(data.get("Snapshot", "—"))
+    def update_status(self, data: dict, active: bool, loading: bool = False):
+        for key, widget in self.rows.items():
+            widget.setText(data.get(key, "—"))
+
+        if loading:
+            self.dot.setStyleSheet("color: #f39c12; font-size: 11px;")
+            self.toggle_btn.setText("...  En cours")
+            self.toggle_btn.setEnabled(False)
+            self.toggle_btn.setStyleSheet(self._btn("#21262d", "#21262d"))
+            return
 
         if active:
-            self.icon_label.setStyleSheet("color: #2ecc71; font-size: 12px;")
-            self.toggle_btn.setText("■ Désactiver")
-            self.toggle_btn.setStyleSheet(self._btn_style("#da3633", "#f85149"))
+            self.dot.setStyleSheet("color: #2ecc71; font-size: 11px;")
+            self.toggle_btn.setText("■  Désactiver")
+            self.toggle_btn.setStyleSheet(self._btn("#da3633", "#f85149"))
         else:
-            self.icon_label.setStyleSheet("color: #e74c3c; font-size: 12px;")
-            self.toggle_btn.setText("▶ Activer")
-            self.toggle_btn.setStyleSheet(self._btn_style("#238636", "#2ea043"))
+            self.dot.setStyleSheet("color: #e74c3c; font-size: 11px;")
+            self.toggle_btn.setText("▶  Activer")
+            self.toggle_btn.setStyleSheet(self._btn("#238636", "#2ea043"))
 
-    def _btn_style(self, bg: str, hover: str) -> str:
-        return f"""
-            QPushButton {{
-                background: {bg};
-                color: #ffffff;
-                border: none;
-                border-radius: 6px;
-                padding: 5px 10px;
-                font-size: 11px;
-                font-family: monospace;
-            }}
-            QPushButton:hover {{ background: {hover}; }}
-        """
+        self.toggle_btn.setEnabled(True)
+        self.newid_btn.setEnabled(active)
 
-    def _new_id(self):
-        worker = GhostSurfWorker("newid")
-        worker.start()
-
-    def show_near_tray(self):
-        """Affiche la fenêtre près du curseur."""
-        cursor_pos = QCursor.pos()
+    def show_near_cursor(self):
         self.adjustSize()
-        x = cursor_pos.x() - self.width() // 2
-        y = cursor_pos.y() - self.height() - 10
-        # Reste dans l'écran
-        screen = QApplication.primaryScreen().geometry()
-        x = max(0, min(x, screen.width() - self.width()))
-        y = max(0, min(y, screen.height() - self.height()))
+        pos = QCursor.pos()
+        screen = QApplication.primaryScreen().availableGeometry()
+        x = max(screen.x(), min(pos.x() - self.width() // 2,
+                                screen.x() + screen.width() - self.width()))
+        y = max(screen.y(), min(pos.y() - self.height() - 12,
+                                screen.y() + screen.height() - self.height()))
         self.move(x, y)
         self.show()
         self.raise_()
         self.activateWindow()
 
 
-# ── Systray principal ─────────────────────────────────────────────────────────
-
 class GhostSurfTray(QSystemTrayIcon):
 
     def __init__(self, app: QApplication):
         super().__init__()
-        self.app = app
-        self._active = False
+        self.app      = app
+        self._active  = False
         self._loading = False
-        self._worker = None
-        self.status_window = StatusWindow()
+        self._worker  = None
+        self._status_worker = None
+
+        self.win = StatusWindow()
+        self.win.toggle_requested.connect(self._toggle)
+        self.win.newid_requested.connect(self._new_identity)
 
         self._build_menu()
         self.setIcon(svg_to_icon(ICON_INACTIVE))
@@ -332,11 +314,10 @@ class GhostSurfTray(QSystemTrayIcon):
         self.activated.connect(self._on_activated)
         self.show()
 
-        # Polling statut toutes les 10s
         self.timer = QTimer()
-        self.timer.timeout.connect(self._refresh_status)
+        self.timer.timeout.connect(self._refresh)
         self.timer.start(10000)
-        self._refresh_status()
+        self._refresh()
 
     def _build_menu(self):
         self.menu = QMenu()
@@ -350,31 +331,26 @@ class GhostSurfTray(QSystemTrayIcon):
                 font-family: monospace;
                 font-size: 12px;
             }
-            QMenu::item {
-                padding: 6px 16px;
-                border-radius: 4px;
-            }
+            QMenu::item { padding: 6px 16px; border-radius: 4px; }
             QMenu::item:selected { background: #21262d; }
             QMenu::separator {
-                height: 1px;
-                background: #30363d;
-                margin: 4px 8px;
+                height: 1px; background: #30363d; margin: 4px 8px;
             }
         """)
 
-        self.status_action = self.menu.addAction("○  GhostSurf — inactif")
-        self.status_action.setEnabled(False)
+        self.status_item = self.menu.addAction("○  GhostSurf — inactif")
+        self.status_item.setEnabled(False)
         self.menu.addSeparator()
 
-        self.toggle_action = self.menu.addAction("▶  Activer")
-        self.toggle_action.triggered.connect(self._toggle)
+        self.toggle_item = self.menu.addAction("▶  Activer")
+        self.toggle_item.triggered.connect(self._toggle)
 
-        self.newid_action = self.menu.addAction("⟳  Nouvelle identité")
-        self.newid_action.triggered.connect(self._new_identity)
+        self.newid_item = self.menu.addAction("⟳  Nouvelle identité")
+        self.newid_item.triggered.connect(self._new_identity)
 
         self.menu.addSeparator()
         self.menu.addAction("◈  Statut détaillé").triggered.connect(
-            self.status_window.show_near_tray
+            self.win.show_near_cursor
         )
         self.menu.addSeparator()
         self.menu.addAction("✕  Quitter").triggered.connect(self.app.quit)
@@ -382,84 +358,93 @@ class GhostSurfTray(QSystemTrayIcon):
 
     def _on_activated(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
-            if self.status_window.isVisible():
-                self.status_window.hide()
+            if self.win.isVisible():
+                self.win.hide()
             else:
-                self.status_window.show_near_tray()
+                self.win.show_near_cursor()
 
-    def _refresh_status(self):
+    def _refresh(self):
+        if self._loading:
+            return
         worker = StatusWorker()
         worker.status_ready.connect(self._on_status)
         worker.start()
         self._status_worker = worker
 
     def _on_status(self, data: dict):
+        if self._loading:
+            return
         tor = data.get("Tor", "inactif")
         ip  = data.get("IP", "—")
         self._active = (tor == "actif")
 
-        if self._loading:
-            return
-
         if self._active:
             self.setIcon(svg_to_icon(ICON_ACTIVE))
-            self.status_action.setText(f"●  Actif — {ip}")
-            self.toggle_action.setText("■  Désactiver")
-            self.setToolTip(f"GhostSurf actif\nIP: {ip}")
+            self.status_item.setText(f"●  Actif — {ip}")
+            self.toggle_item.setText("■  Désactiver")
+            self.newid_item.setEnabled(True)
+            self.setToolTip(f"GhostSurf actif\nIP : {ip}")
         else:
             self.setIcon(svg_to_icon(ICON_INACTIVE))
-            self.status_action.setText("○  Inactif")
-            self.toggle_action.setText("▶  Activer")
+            self.status_item.setText("○  Inactif")
+            self.toggle_item.setText("▶  Activer")
+            self.newid_item.setEnabled(False)
             self.setToolTip("GhostSurf — inactif")
 
-        self.status_window.update_status(data, self._active)
-        self.status_window.toggle_btn.clicked.disconnect() if \
-            self.status_window.toggle_btn.receivers(
-                self.status_window.toggle_btn.clicked) > 0 else None
-        self.status_window.toggle_btn.clicked.connect(self._toggle)
+        self.win.update_status(data, self._active)
 
     def _toggle(self):
         if self._loading:
             return
         self._loading = True
         self.setIcon(svg_to_icon(ICON_LOADING))
-        self.status_action.setText("○  En cours...")
-        self.toggle_action.setEnabled(False)
+        self.status_item.setText("○  En cours...")
+        self.toggle_item.setEnabled(False)
+        self.win.update_status({}, self._active, loading=True)
 
         cmd = "stop" if self._active else "start"
         self._worker = GhostSurfWorker(cmd)
-        self._worker.finished.connect(self._on_command_done)
+        self._worker.finished.connect(self._on_done)
         self._worker.start()
 
-    def _on_command_done(self, success: bool, output: str):
+    def _on_done(self, success: bool, _output: str):
         self._loading = False
-        self.toggle_action.setEnabled(True)
-        self._refresh_status()
+        self.toggle_item.setEnabled(True)
+        self._refresh()
 
     def _new_identity(self):
-        if not self._active:
+        if not self._active or self._loading:
             return
-        self.newid_action.setEnabled(False)
+        self.newid_item.setEnabled(False)
         worker = GhostSurfWorker("newid")
-        worker.finished.connect(lambda ok, _: (
-            self.newid_action.setEnabled(True),
-            self._refresh_status()
-        ))
+        worker.finished.connect(
+            lambda ok, _: (
+                self.newid_item.setEnabled(True),
+                self._refresh()
+            )
+        )
         worker.start()
 
 
-# ── Point d'entrée ────────────────────────────────────────────────────────────
-
 def main():
+    # Vérifie qu'on n'est pas root
+    if os.geteuid() == 0:
+        print("Le systray ne doit pas être lancé en root.")
+        print("Lance : ghostsurf tray  (sans sudo)")
+        sys.exit(1)
+
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("GhostSurf")
 
-    if not QSystemTrayIcon.isSystemTrayAvailable():
-        print("Systray non disponible sur ce bureau")
+    tray = GhostSurfTray(app)
+
+    # DBus warning est normal sur certains environnements — pas bloquant
+    if not tray.isVisible():
+        print("Impossible d'afficher le systray.")
+        print("Vérifie que ton bureau est démarré et que DISPLAY est défini.")
         sys.exit(1)
 
-    tray = GhostSurfTray(app)
     sys.exit(app.exec())
 
 

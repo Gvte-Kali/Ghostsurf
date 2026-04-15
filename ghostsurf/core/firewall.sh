@@ -59,6 +59,18 @@ table inet ghostsurf {
         meta l4proto tcp redirect to :$TRANS_PORT
     }
 
+    chain filter_input {
+        type filter hook input priority 0; policy drop;
+
+        # Loopback
+        iifname "lo" accept
+
+        # Connexions établies et related uniquement
+        ct state established,related accept
+
+        # DROP tout le reste (fail-closed)
+    }
+
     chain filter_output {
         type filter hook output priority 0; policy drop;
 
@@ -74,6 +86,14 @@ table inet ghostsurf {
         # Nouvelles connexions vers TransPort et DNSPort locaux
         ip daddr 127.0.0.1 tcp dport $TRANS_PORT ct state new accept
         ip daddr 127.0.0.1 udp dport $DNS_PORT ct state new accept
+
+        # Bloque ICMP sortant (prévention leakage réseau)
+        meta l4proto icmp drop
+        meta l4proto icmpv6 drop
+
+        # Bloque multicast et broadcast explicitement
+        ip daddr 224.0.0.0/4 drop
+        ip daddr 255.255.255.255 drop
 
         # Bloque IPv6
         meta nfproto ipv6 drop

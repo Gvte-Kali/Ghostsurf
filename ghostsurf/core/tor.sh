@@ -49,6 +49,57 @@ tor_check_ip() {
         grep -oP '"IP":"\K[^"]+' || echo "?"
 }
 
+tor_myip() {
+    local response ip is_tor country
+    response=$(curl -s --max-time 10 \
+        --socks5-hostname "127.0.0.1:$TOR_SOCKS_PORT" \
+        https://check.torproject.org/api/ip 2>/dev/null)
+
+    ip=$(printf '%s' "$response" | grep -oP '"IP":"\K[^"]+' || echo "?")
+    is_tor=$(printf '%s' "$response" | grep -oP '"IsTor":\K(true|false)' || echo "?")
+
+    country=$(curl -s --max-time 8 \
+        --socks5-hostname "127.0.0.1:$TOR_SOCKS_PORT" \
+        "https://ipinfo.io/country" 2>/dev/null | tr -d '[:space:]' || echo "?")
+
+    log_debug "tor_myip: ip=$ip is_tor=$is_tor country=$country"
+    printf "  IP Tor   : %s\n  IsTor    : %s\n  Pays     : %s\n" \
+        "$ip" "$is_tor" "$country"
+}
+
+tor_uptime() {
+    local svc; svc=$(_tor_service_name)
+    systemctl show "$svc" --property=ActiveEnterTimestamp --no-pager 2>/dev/null | \
+        sed 's/ActiveEnterTimestamp=//' || echo "?"
+}
+
+tor_circuit_count() {
+    local count
+    count=$(printf 'AUTHENTICATE ""\r\nGETINFO circuit-status\r\nQUIT\r\n' | \
+        nc -w2 127.0.0.1 "$TOR_CONTROL_PORT" 2>/dev/null | \
+        grep -cP '^\d+ (BUILT|LAUNCHED|EXTENDED)' 2>/dev/null) || count="0"
+    echo "${count:-0}"
+}
+
+tor_check_dns_leak() {
+    log_debug "Vérification DNS leak..."
+    local ns
+    ns=$(grep -m1 -oP '^nameserver\s+\K\S+' /etc/resolv.conf 2>/dev/null || echo "?")
+    log_debug "DNS leak check: nameserver=$ns"
+
+    if [[ "$ns" != "127.0.0.1" ]]; then
+        log_debug "DNS leak: resolv.conf → $ns"
+        return 1
+    fi
+
+    if systemctl is-active --quiet systemd-resolved 2>/dev/null; then
+        log_debug "DNS leak: systemd-resolved actif"
+        return 1
+    fi
+
+    return 0
+}
+
 _tor_write_config() {
     [[ -f "$TORRC_PATH" && ! -f "${TORRC_PATH}.ghostsurf.bak" ]] && \
         cp "$TORRC_PATH" "${TORRC_PATH}.ghostsurf.bak"

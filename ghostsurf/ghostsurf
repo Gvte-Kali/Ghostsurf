@@ -40,8 +40,10 @@ Usage: sudo ghostsurf <commande> [options]
   start             Active le proxy Tor transparent
   stop              Désactive et restaure l'état original
   restart           Redémarre
-  status            Affiche l'état (IP, Tor, firewall)
+  status            Affiche l'état complet (IP, Tor, circuits, DNS...)
   newid             Nouvelle identité Tor
+  myip              Affiche l'IP Tor, IsTor et pays du nœud de sortie
+  check-leaks       Vérifie les fuites DNS, WebRTC, IPv6 et IP
 
   snapshot          Crée un snapshot manuel
   restore [<ts>]    Restaure un snapshot
@@ -91,27 +93,117 @@ cmd_stop() {
 }
 
 cmd_status() {
-    local tor_st fw_st ip distro_n backend sel_st snap_date
+    local tor_st fw_st distro_n backend sel_st snap_date
     tor_st=$(tor_is_active 2>/dev/null && echo "actif" || echo "inactif")
     fw_st=$(firewall_is_active 2>/dev/null && echo "actif" || echo "inactif")
-    ip=$(tor_check_ip 2>/dev/null || echo "indisponible")
     distro_n=$(distro_name 2>/dev/null || echo "inconnu")
     backend=$(firewall_detect_backend 2>/dev/null || echo "inconnu")
     sel_st=$(selinux_status 2>/dev/null || echo "N/A")
     snap_date=$(snapshot_latest_date 2>/dev/null || echo "aucun")
+
     cat <<EOF
 
   GhostSurf v$GHOSTSURF_VERSION
   ─────────────────────────────
   Tor        : $tor_st
   Firewall   : $fw_st
-  IP         : $ip
   Distro     : $distro_n
   Backend fw : $backend
   SELinux    : $sel_st
   Snapshot   : $snap_date
 
 EOF
+
+    if tor_is_active 2>/dev/null; then
+        local uptime circuits dns_st
+        uptime=$(tor_uptime 2>/dev/null || echo "?")
+        circuits=$(tor_circuit_count 2>/dev/null || echo "?")
+        dns_st=$(tor_check_dns_leak 2>/dev/null && echo "OK" || echo "LEAK DÉTECTÉ")
+
+        echo "  ── Identité Tor ──────────────────"
+        tor_myip 2>/dev/null || echo "  (indisponible)"
+        cat <<EOF
+
+  ── Sécurité ──────────────────────
+  Uptime Tor : $uptime
+  Circuits   : $circuits
+  DNS Leak   : $dns_st
+
+EOF
+    fi
+}
+
+cmd_myip() {
+    echo ""
+    if ! tor_is_active 2>/dev/null; then
+        log_warn "Tor inactif — lancez 'ghostsurf start' d'abord"
+        return 1
+    fi
+    tor_myip
+    echo ""
+}
+
+cmd_check_leaks() {
+    echo ""
+    echo "  GhostSurf — Vérification des fuites"
+    echo "  ─────────────────────────────────────"
+    echo ""
+
+    local pass=0 fail=0
+
+    _chk() {
+        local name=$1 ok=$2 detail=${3:-}
+        if [[ "$ok" == "1" ]]; then
+            log_success "PASS  $name${detail:+  ($detail)}"
+            ((pass++)) || true
+        else
+            log_error  "FAIL  $name${detail:+  ($detail)}"
+            ((fail++)) || true
+        fi
+    }
+
+    # 1. DNS leak
+    local ns; ns=$(grep -m1 -oP '^nameserver\s+\K\S+' /etc/resolv.conf 2>/dev/null || echo "?")
+    if tor_check_dns_leak 2>/dev/null; then
+        _chk "DNS leak" 1
+    else
+        _chk "DNS leak" 0 "resolver=$ns"
+    fi
+
+    # 2. WebRTC/STUN — UDP 3478 ne doit pas passer (kill switch UDP)
+    if nc -u -z -w2 8.8.8.8 3478 2>/dev/null; then
+        _chk "WebRTC (UDP/STUN)" 0 "port UDP 3478 accessible"
+    else
+        _chk "WebRTC (UDP/STUN)" 1
+    fi
+
+    # 3. IPv6 leak — tente une connexion IPv6
+    if curl -s --max-time 5 --ipv6 https://ipv6.icanhazip.com 2>/dev/null | \
+            grep -qP '^[0-9a-f:]+$'; then
+        _chk "IPv6 leak" 0 "connexion IPv6 possible"
+    else
+        _chk "IPv6 leak" 1
+    fi
+
+    # 4. IP Tor — vérifie que le trafic sort bien via Tor
+    local response ip is_tor
+    response=$(curl -s --max-time 10 \
+        --socks5-hostname "127.0.0.1:$TOR_SOCKS_PORT" \
+        https://check.torproject.org/api/ip 2>/dev/null)
+    ip=$(printf '%s' "$response" | grep -oP '"IP":"\K[^"]+' || echo "?")
+    is_tor=$(printf '%s' "$response" | grep -oP '"IsTor":\K(true|false)' || echo "false")
+
+    if [[ "$is_tor" == "true" ]]; then
+        _chk "Tor actif (IsTor)" 1 "IP=$ip"
+    else
+        _chk "Tor actif (IsTor)" 0 "IP=$ip"
+    fi
+
+    echo ""
+    echo "  ─────────────────────────────────────"
+    printf "  Résultat : %d PASS, %d FAIL\n" "$pass" "$fail"
+    echo ""
+    [[ $fail -eq 0 ]]
 }
 
 cmd_dev_start() {
@@ -158,6 +250,8 @@ case "${1:-}" in
     stop)            cmd_stop ;;
     restart)         cmd_stop; cmd_start ;;
     status)          cmd_status ;;
+    myip)            cmd_myip ;;
+    check-leaks)     cmd_check_leaks ;;
     newid)           require_root; identity_new ;;
     snapshot)        require_root; snapshot_create ;;
     restore)         require_root; snapshot_restore "${2:-}" ;;

@@ -27,8 +27,9 @@ run_test tests/test_distro.sh   false
 run_test tests/test_snapshot.sh true
 run_test tests/test_firewall.sh true
 run_test tests/test_spoof.sh    true
+run_test tests/test_tor.sh      false
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "Suites: $TOTAL_PASS passées, $TOTAL_FAIL échouées"
-[[ $FAIL -eq 0 ]]
+[[ $TOTAL_FAIL -eq 0 ]]
