@@ -213,32 +213,31 @@ class StatusWindow(QWidget):
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(6)
 
-        # Header
+        # Header — point + drapeau + IP
         header = QHBoxLayout()
         self.dot = QLabel("●")
-        self.dot.setStyleSheet("color: #e74c3c; font-size: 11px;")
-        title = QLabel("GhostSurf")
-        title.setStyleSheet(
-            "color: #e6edf3; font-size: 14px; font-weight: bold;"
-        )
-        header.addWidget(self.dot)
-        header.addSpacing(6)
-        header.addWidget(title)
-        header.addStretch()
-        layout.addLayout(header)
+        self.dot.setStyleSheet("color: #e74c3c; font-size: 14px;")
 
-        self._add_sep(layout)
+        self.flag_label = QLabel("")
+        self.flag_label.setStyleSheet("""
+            font-size: 14px;
+            font-family: 'Noto Color Emoji', 'Segoe UI Emoji', 'Apple Color Emoji';
+        """)
 
-        # IP publique avec drapeau — mise en avant
         self.ip_banner = QLabel("—")
         self.ip_banner.setStyleSheet("""
-            color: #2ecc71;
-            font-size: 16px;
+            color: #ffffff;
+            font-size: 14px;
             font-weight: bold;
-            padding: 8px 0;
+            font-family: sans-serif;
         """)
-        self.ip_banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.ip_banner)
+
+        header.addWidget(self.dot)
+        header.addSpacing(6)
+        header.addWidget(self.flag_label)
+        header.addSpacing(4)
+        header.addWidget(self.ip_banner, 1)
+        layout.addLayout(header)
 
         self._add_sep(layout)
 
@@ -325,38 +324,42 @@ class StatusWindow(QWidget):
         """
 
     def update_status(self, data: dict, active: bool, loading: bool = False):
-        # IP banner avec drapeau
-        ip  = data.get("IP Tor", data.get("IP", ""))
+        ip   = data.get("IP Tor", data.get("IP", ""))
         pays = data.get("Pays", "")
-        flag = COUNTRY_FLAGS.get(pays.upper(), "🌐") if pays else ""
+        flag = COUNTRY_FLAGS.get(pays.upper(), "") if pays else ""
 
-        if ip and ip != "?" and ip != "—":
-            self.ip_banner.setText(f"{flag}  {ip}  {pays}")
-            self.ip_banner.setStyleSheet(
-                "color: #2ecc71; font-size: 15px; font-weight: bold; padding: 8px 0;"
-            )
+        if ip and ip not in ("?", "—", ""):
+            self.flag_label.setText(flag)
+            self.ip_banner.setText(f"{ip}  {pays}")
+            self.ip_banner.setStyleSheet("""
+                color: #ffffff;
+                font-size: 14px;
+                font-weight: bold;
+                font-family: sans-serif;
+            """)
         else:
-            self.ip_banner.setText("—")
+            self.flag_label.setText("")
+            self.ip_banner.setText("Pas de connexion Tor")
             self.ip_banner.setStyleSheet(
-                "color: #8b949e; font-size: 15px; padding: 8px 0;"
+                "color: #8b949e; font-size: 13px; font-family: sans-serif;"
             )
 
         for key, widget in self.rows.items():
             widget.setText(data.get(key, "—"))
 
         if loading:
-            self.dot.setStyleSheet("color: #f39c12; font-size: 11px;")
+            self.dot.setStyleSheet("color: #f39c12; font-size: 14px;")
             self.toggle_btn.setText("...  En cours")
             self.toggle_btn.setEnabled(False)
             self.toggle_btn.setStyleSheet(self._btn("#21262d", "#21262d"))
             return
 
         if active:
-            self.dot.setStyleSheet("color: #2ecc71; font-size: 11px;")
+            self.dot.setStyleSheet("color: #2ecc71; font-size: 14px;")
             self.toggle_btn.setText("■  Désactiver")
             self.toggle_btn.setStyleSheet(self._btn("#da3633", "#f85149"))
         else:
-            self.dot.setStyleSheet("color: #e74c3c; font-size: 11px;")
+            self.dot.setStyleSheet("color: #e74c3c; font-size: 14px;")
             self.toggle_btn.setText("▶  Activer")
             self.toggle_btn.setStyleSheet(self._btn("#238636", "#2ea043"))
 
@@ -469,7 +472,7 @@ class GhostSurfTray(QSystemTrayIcon):
             self.win.show_near_cursor
         )
         self.menu.addSeparator()
-        self.menu.addAction("✕  Quitter").triggered.connect(self.app.quit)
+        self.menu.addAction("✕  Quitter").triggered.connect(self._quit)
         self.setContextMenu(self.menu)
 
     def _on_activated(self, reason):
@@ -587,6 +590,22 @@ class GhostSurfTray(QSystemTrayIcon):
         if self._newid_worker:
             self._newid_worker.wait(3000)
         self._refresh()
+
+    def _quit(self):
+        """Stoppe GhostSurf si actif puis ferme le tray proprement."""
+        if self._active:
+            self.win.add_log("Arrêt GhostSurf avant fermeture...", "warn")
+            self.status_item.setText("○  Fermeture en cours...")
+            try:
+                subprocess.run(
+                    ["sudo", str(GHOSTSURF_BIN), "stop"],
+                    timeout=60
+                )
+            except Exception as e:
+                print(f"Erreur stop: {e}")
+        self.timer_fast.stop()
+        self.timer_slow.stop()
+        self.app.quit()
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────

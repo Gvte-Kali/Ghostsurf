@@ -103,28 +103,40 @@ tor_check_dns_leak() {
 }
 
 _tor_write_config() {
+    # Backup du torrc original une seule fois
     [[ -f "$TORRC_PATH" && ! -f "${TORRC_PATH}.ghostsurf.bak" ]] && \
         cp "$TORRC_PATH" "${TORRC_PATH}.ghostsurf.bak"
 
+    # Écrit le fichier ghostsurf.torrc
     cat > "$TORRC_GHOSTSURF" <<TORRC
+# GhostSurf torrc — généré automatiquement
 VirtualAddrNetworkIPv4 10.192.0.0/10
 AutomapHostsOnResolve 1
 TransPort 127.0.0.1:9040
 DNSPort 127.0.0.1:5353
-DNSPort 127.0.0.1:53
 SocksPort 9050
 SocksPort 9100 IsolateClientAddr IsolateSOCKSAuth
 ControlPort 9051
 TORRC
 
-    grep -q "ghostsurf.torrc" "$TORRC_PATH" 2>/dev/null || \
+    # Ajoute le %include seulement s'il n'est pas déjà présent
+    if ! grep -q "ghostsurf.torrc" "$TORRC_PATH" 2>/dev/null; then
         echo "%include $TORRC_GHOSTSURF" >> "$TORRC_PATH"
+    fi
 }
 
 _tor_restore_config() {
-    [[ -f "${TORRC_PATH}.ghostsurf.bak" ]] && \
-        cp "${TORRC_PATH}.ghostsurf.bak" "$TORRC_PATH"
+    # Supprime la ligne %include du torrc principal
+    sed -i '/%include.*ghostsurf/d' "$TORRC_PATH" 2>/dev/null || true
+
+    # Supprime le fichier ghostsurf.torrc
     rm -f "$TORRC_GHOSTSURF"
+
+    # Restaure le backup si présent
+    if [[ -f "${TORRC_PATH}.ghostsurf.bak" ]]; then
+        cp "${TORRC_PATH}.ghostsurf.bak" "$TORRC_PATH"
+        rm -f "${TORRC_PATH}.ghostsurf.bak"
+    fi
 }
 
 _tor_configure_dns() {

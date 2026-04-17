@@ -4,6 +4,7 @@ set -eE
 
 GHOSTSURF_VERSION="0.1.0"
 GHOSTSURF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ORIG_ARGS=("$@")
 LIB_DIR="$GHOSTSURF_DIR/core"
 CONFIG_DIR="/etc/ghostsurf"
 STATE_DIR="/var/lib/ghostsurf"
@@ -28,7 +29,9 @@ trap 'snapshot_restore 2>/dev/null; exit 130' INT
 trap 'snapshot_restore 2>/dev/null; exit 143' TERM
 
 require_root() {
-    [[ $EUID -eq 0 ]] || { log_error "ghostsurf requiert root (sudo)"; exit 1; }
+    if [[ $EUID -ne 0 ]]; then
+        exec sudo "$0" "${ORIG_ARGS[@]}"
+    fi
 }
 
 usage() {
@@ -85,12 +88,23 @@ cmd_start() {
 cmd_stop() {
     require_root
     log_info "Arrêt GhostSurf..."
+
+    # Tue le watchdog s'il tourne encore
+    if [[ -f "$STATE_DIR/watchdog.pid" ]]; then
+        local wpid; wpid=$(cat "$STATE_DIR/watchdog.pid" 2>/dev/null)
+        if [[ -n "$wpid" ]] && kill -0 "$wpid" 2>/dev/null; then
+            kill "$wpid" 2>/dev/null || true
+            log_debug "Watchdog $wpid tué"
+        fi
+        rm -f "$STATE_DIR/watchdog.pid"
+    fi
+
     firewall_restore 2>/dev/null || true
-    rm -f "$STATE_DIR/active"
     tor_stop 2>/dev/null || true
     [[ "$GHOSTSURF_SPOOF" == "true" ]] && spoof_restore 2>/dev/null || true
     [[ "$GHOSTSURF_SELINUX" == "true" ]] && selinux_teardown 2>/dev/null || true
     snapshot_restore
+    rm -f "$STATE_DIR/active"
     log_success "GhostSurf arrêté. État système restauré."
 }
 
@@ -284,15 +298,14 @@ case "${1:-}" in
         export STATE_DIR="$HOME/.local/share/ghostsurf"
         mkdir -p "$STATE_DIR"
         python3 "$GHOSTSURF_DIR/gui/tray.py"
-        local exit_code=$?
-        if [[ $exit_code -ne 0 && $exit_code -ne 130 ]]; then
-            log_warn "Tray crashé (code $exit_code) — vérification état système..."
+        _tray_exit=$?
+        if [[ $_tray_exit -ne 0 && $_tray_exit -ne 130 ]]; then
+            log_warn "Tray crashé (code $_tray_exit)"
             if [[ -f "$STATE_DIR/active" ]]; then
-                log_warn "GhostSurf était actif au moment du crash"
+                log_warn "GhostSurf était actif — lance 'sudo ghostsurf stop' pour restaurer"
                 notify-send "GhostSurf" \
-                    "Le systray a crashé. GhostSurf est toujours actif.\nLance 'ghostsurf stop' pour restaurer." \
+                    "Le systray a crashé. Lance 'sudo ghostsurf stop' pour restaurer." \
                     --icon=dialog-warning 2>/dev/null || true
-                log_warn "Lance 'sudo ghostsurf stop' pour restaurer l'état système"
             fi
         fi
         ;;

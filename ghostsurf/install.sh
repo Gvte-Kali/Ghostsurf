@@ -62,7 +62,11 @@ if [[ ${#MISSING_PKGS[@]} -gt 0 ]]; then
                 IFS='|' read -r _ pkg _ _ <<< "$entry"
                 apt_pkgs+=("$pkg")
             done
-            apt-get install -y "${apt_pkgs[@]}" || {
+            if command -v debconf-set-selections &>/dev/null; then
+                echo "macchanger macchanger/automatically_run boolean false" | \
+                    debconf-set-selections
+            fi
+            DEBIAN_FRONTEND=noninteractive apt-get install -y "${apt_pkgs[@]}" || {
                 error "Échec installation. Installez manuellement :"
                 echo "  sudo apt install tor nftables curl iproute2 macchanger torsocks python3"
                 exit 1
@@ -135,6 +139,29 @@ else
     success "PyQt6 présent"
 fi
 
+# --- Étape 2b : Police emoji ---
+info "Vérification police emoji (Noto Color Emoji)..."
+case "${PKG_MANAGER:-}" in
+    apt)
+        DEBIAN_FRONTEND=noninteractive apt-get install -y fonts-noto-color-emoji 2>/dev/null && \
+            success "fonts-noto-color-emoji installé" || \
+            warn "Impossible d'installer fonts-noto-color-emoji (non bloquant)"
+        ;;
+    dnf)
+        dnf install -y google-noto-emoji-color-fonts 2>/dev/null && \
+            success "Noto Color Emoji installé" || \
+            warn "Impossible d'installer Noto Color Emoji (non bloquant)"
+        ;;
+    pacman)
+        pacman -S --noconfirm noto-fonts-emoji 2>/dev/null && \
+            success "noto-fonts-emoji installé" || \
+            warn "Impossible d'installer noto-fonts-emoji (non bloquant)"
+        ;;
+    *)
+        warn "Police emoji : installez manuellement fonts-noto-color-emoji"
+        ;;
+esac
+
 # --- Étape 3 : Tests avant installation ---
 echo ""
 info "Lancement des tests de validation..."
@@ -192,10 +219,25 @@ chmod +x "$INSTALL_BIN"
 chmod +x "$INSTALL_LIB/core/"*.sh
 chmod +x "$INSTALL_LIB/tests/"*.sh
 
-# Autostart systray
-mkdir -p /etc/xdg/autostart
-cp "$SRC_DIR/sys-units/ghostsurf-tray.desktop" /etc/xdg/autostart/
-cp "$SRC_DIR/sys-units/ghostsurf-tray.desktop" /usr/share/applications/
+# Autostart systray au démarrage de session
+info "Configuration de l'autostart..."
+AUTOSTART_DIR="/etc/xdg/autostart"
+mkdir -p "$AUTOSTART_DIR"
+cat > "$AUTOSTART_DIR/ghostsurf-tray.desktop" <<EOF
+[Desktop Entry]
+Name=GhostSurf
+Comment=Transparent Tor proxy — systray
+Exec=/bin/bash -c 'sleep 3 && ghostsurf tray'
+Icon=network-vpn
+Type=Application
+Categories=Network;Security;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=3
+EOF
+cp "$AUTOSTART_DIR/ghostsurf-tray.desktop" \
+   /usr/share/applications/ghostsurf.desktop 2>/dev/null || true
+success "Autostart configuré"
 
 # Config par défaut
 if [[ ! -f "$INSTALL_CONF/ghostsurf.conf" ]]; then
